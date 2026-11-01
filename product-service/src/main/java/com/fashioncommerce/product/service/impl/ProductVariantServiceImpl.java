@@ -31,6 +31,11 @@ public class ProductVariantServiceImpl implements ProductVariantService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Product not found with ID: " + request.getProductId()));
 
+        if (variantRepository.existsBySku(request.getSku())) {
+            throw new IllegalArgumentException(
+                    "Variant SKU already exists");
+        }
+
         if (variantRepository.existsByProductIdAndSizeAndColor(
                 request.getProductId(),
                 request.getSize(),
@@ -39,6 +44,8 @@ public class ProductVariantServiceImpl implements ProductVariantService {
             throw new IllegalArgumentException(
                     "Variant with this size and color already exists for this product");
         }
+
+
 
         ProductVariant variant = new ProductVariant();
 
