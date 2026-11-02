@@ -49,6 +49,16 @@ public class InventoryReservationController {
         );
     }
 
+    @PostMapping("/{id}/reverse")
+    public ResponseEntity<ReservationResponseDTO> reverse(
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.ok(
+                reservationService.reverseReservation(id)
+        );
+    }
+
+
     @GetMapping("/order/{orderId}")
     public ResponseEntity<List<ReservationResponseDTO>> getByOrder(
             @PathVariable Long orderId

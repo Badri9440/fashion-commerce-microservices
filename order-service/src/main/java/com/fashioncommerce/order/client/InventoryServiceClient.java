@@ -60,6 +60,14 @@ public class InventoryServiceClient {
                 .body(ReservationClientDTO.class);
     }
 
+    public ReservationClientDTO reverseReservation(Long reservationId) {
+        return restClient.post()
+                .uri("/api/reservations/{id}/reverse", reservationId)
+                .retrieve()
+                .body(ReservationClientDTO.class);
+    }
+
+
     public List<ReservationClientDTO> getReservationsByOrder(
             Long orderId
     ) {

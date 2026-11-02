@@ -3,6 +3,7 @@ package com.fashioncommerce.order.service;
 
 import com.fashioncommerce.order.dto.OrderRequestDTO;
 import com.fashioncommerce.order.dto.OrderResponseDTO;
+import com.fashioncommerce.order.entity.PaymentMethod;
 
 import java.util.List;
 
@@ -19,4 +20,10 @@ public interface OrderService {
     List<OrderResponseDTO> getOrdersByWarehouse(Long warehouseId);
 
     OrderResponseDTO cancelOrder(Long orderId);
+
+    OrderResponseDTO checkout(
+            Long orderId,
+            PaymentMethod paymentMethod,
+            Boolean simulatePaymentSuccess
+    );
 }

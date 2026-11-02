@@ -1,3 +1,4 @@
+
 package com.fashioncommerce.inventory.service;
 
 import com.fashioncommerce.inventory.dto.*;
@@ -13,6 +14,8 @@ public interface InventoryReservationService {
     ReservationResponseDTO confirmReservation(Long reservationId);
 
     ReservationResponseDTO cancelReservation(Long reservationId);
+
+    ReservationResponseDTO reverseReservation(Long reservationId);
 
     List<ReservationResponseDTO> getReservationsByOrder(Long orderId);
 }

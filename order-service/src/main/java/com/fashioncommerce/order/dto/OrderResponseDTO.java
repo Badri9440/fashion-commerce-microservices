@@ -1,7 +1,10 @@
+
 package com.fashioncommerce.order.dto;
 
 import com.fashioncommerce.order.entity.OrderStatus;
 import com.fashioncommerce.order.entity.OrderType;
+import com.fashioncommerce.order.entity.PaymentMethod;
+import com.fashioncommerce.order.entity.PaymentStatus;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -20,6 +23,8 @@ public record OrderResponseDTO(
         Long warehouseId,
         List<OrderItemResponseDTO> items,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        PaymentMethod paymentMethod,
+        PaymentStatus paymentStatus
 
 ) {}

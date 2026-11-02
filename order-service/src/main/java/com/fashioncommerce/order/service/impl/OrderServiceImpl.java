@@ -11,6 +11,8 @@ import com.fashioncommerce.order.dto.*;
 import com.fashioncommerce.order.entity.Order;
 import com.fashioncommerce.order.entity.OrderItem;
 import com.fashioncommerce.order.entity.OrderStatus;
+import com.fashioncommerce.order.entity.PaymentMethod;
+import com.fashioncommerce.order.entity.PaymentStatus;
 import com.fashioncommerce.order.repository.OrderRepository;
 import com.fashioncommerce.order.service.OrderService;
 
@@ -52,10 +54,10 @@ public class OrderServiceImpl implements OrderService {
                     BAD_REQUEST, "Order items are required");
         }
 
-        // Combine quantities for duplicate variants.
         Map<Long, Integer> quantities = new HashMap<>();
 
         for (OrderItemRequestDTO item : request.items()) {
+
             if (item == null || item.variantId() == null
                     || item.quantity() == null
                     || item.quantity() <= 0) {
@@ -75,7 +77,6 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // Retrieve warehouse stock.
         List<InventoryClientDTO> stock =
                 inventoryClient.getWarehouseInventory(
                         request.warehouseId());
@@ -94,8 +95,7 @@ public class OrderServiceImpl implements OrderService {
         }
 
         Order order = new Order();
-        order.setOrderNumber(
-                "ORD-" + UUID.randomUUID());
+        order.setOrderNumber("ORD-" + UUID.randomUUID());
         order.setCustomerId(request.customerId());
         order.setOrderType(request.orderType());
         order.setStatus(OrderStatus.PENDING);
@@ -105,7 +105,6 @@ public class OrderServiceImpl implements OrderService {
 
         BigDecimal total = BigDecimal.ZERO;
 
-        // Validate products and calculate prices.
         for (Map.Entry<Long, Integer> entry
                 : quantities.entrySet()) {
 
@@ -153,7 +152,6 @@ public class OrderServiceImpl implements OrderService {
 
         order.setTotalAmount(total);
 
-        // Save first to obtain the database order ID.
         Order savedOrder = orderRepository.saveAndFlush(order);
 
         List<Long> reservationIds = new ArrayList<>();
@@ -185,37 +183,52 @@ public class OrderServiceImpl implements OrderService {
                 reservationIds.add(reservation.id());
             }
 
-            // Keep PENDING until checkout/payment handling
-            // determines the next order status.
             return toResponse(savedOrder);
 
         } catch (Exception ex) {
 
-            // Try to cancel reservations created before failure.
             boolean cleanupSuccessful = true;
 
-            for (Long reservationId : reservationIds) {
-                try {
-                    inventoryClient.cancelReservation(reservationId);
-                } catch (Exception cleanupException) {
+            // Query inventory again in case a reservation was
+            // created but its HTTP response was lost.
+            try {
+                List<ReservationClientDTO> current =
+                        inventoryClient.getReservationsByOrder(
+                                savedOrder.getId());
+
+                if (current == null) {
                     cleanupSuccessful = false;
+                } else {
+                    for (ReservationClientDTO reservation : current) {
+                        if ("ACTIVE".equals(reservation.status())) {
+                            inventoryClient.cancelReservation(
+                                    reservation.id());
+                        } else if (!"CANCELLED".equals(
+                                reservation.status())) {
+                            cleanupSuccessful = false;
+                        }
+                    }
                 }
+
+            } catch (Exception cleanupEx) {
+                cleanupSuccessful = false;
             }
 
-            savedOrder.setStatus(OrderStatus.CANCELLED);
+            savedOrder.setStatus(
+                    cleanupSuccessful
+                            ? OrderStatus.CANCELLED
+                            : OrderStatus.RECOVERY_REQUIRED
+            );
+
             orderRepository.saveAndFlush(savedOrder);
 
-            if (!cleanupSuccessful) {
-                throw new ResponseStatusException(
-                        INTERNAL_SERVER_ERROR,
-                        "Reservation cleanup incomplete; manual reconciliation required",
-                        ex
-                );
-            }
-
             throw new ResponseStatusException(
-                    SERVICE_UNAVAILABLE,
-                    "Order could not be completed; reservation reconciliation may be required",
+                    cleanupSuccessful
+                            ? SERVICE_UNAVAILABLE
+                            : INTERNAL_SERVER_ERROR,
+                    cleanupSuccessful
+                            ? "Order creation failed; reservations released"
+                            : "Order creation requires reconciliation",
                     ex
             );
         }
@@ -228,6 +241,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public OrderResponseDTO getOrderByNumber(String orderNumber) {
+
         Order order = orderRepository
                 .findByOrderNumber(orderNumber)
                 .orElseThrow(() -> new ResponseStatusException(
@@ -257,46 +271,297 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    public OrderResponseDTO checkout(
+            Long orderId,
+            PaymentMethod paymentMethod,
+            Boolean simulatePaymentSuccess
+    ) {
+
+        if (paymentMethod == null) {
+            throw new ResponseStatusException(
+                    BAD_REQUEST, "Payment method is required");
+        }
+
+        if (paymentMethod == PaymentMethod.ONLINE
+                && simulatePaymentSuccess == null) {
+            throw new ResponseStatusException(
+                    BAD_REQUEST,
+                    "Simulated payment result is required");
+        }
+
+        // Check existence first for a clear 404 response.
+        findOrder(orderId);
+
+        // Atomically claim the order.
+        int claimed = orderRepository.updateStatusIfCurrent(
+                orderId,
+                OrderStatus.PENDING,
+                OrderStatus.CHECKOUT_IN_PROGRESS
+        );
+
+        if (claimed != 1) {
+            throw new ResponseStatusException(
+                    CONFLICT,
+                    "Order is not PENDING or checkout is already running"
+            );
+        }
+
+        try {
+            Order order = findOrder(orderId);
+
+            List<ReservationClientDTO> reservations =
+                    inventoryClient.getReservationsByOrder(orderId);
+
+            if (reservations == null
+                    || reservations.size() != order.getItems().size()
+                    || reservations.stream().anyMatch(
+                    r -> r == null
+                            || r.id() == null
+                            || !"ACTIVE".equals(r.status()))) {
+
+                markRecoveryRequired(orderId);
+
+                throw new ResponseStatusException(
+                        CONFLICT,
+                        "Reservations require reconciliation"
+                );
+            }
+
+            // Simulated online payment failure:
+            // no inventory confirmation has occurred.
+            if (paymentMethod == PaymentMethod.ONLINE
+                    && Boolean.FALSE.equals(simulatePaymentSuccess)) {
+
+                order.setPaymentMethod(paymentMethod);
+                order.setPaymentStatus(PaymentStatus.FAILED);
+
+                // Persist payment failure before releasing claim.
+                orderRepository.saveAndFlush(order);
+
+                int released = orderRepository.updateStatusIfCurrent(
+                        orderId,
+                        OrderStatus.CHECKOUT_IN_PROGRESS,
+                        OrderStatus.PENDING
+                );
+
+                if (released != 1) {
+                    throw new IllegalStateException(
+                            "Could not release checkout claim"
+                    );
+                }
+
+                return toResponse(findOrder(orderId));
+            }
+
+            for (ReservationClientDTO reservation : reservations) {
+
+                ReservationClientDTO confirmed =
+                        inventoryClient.confirmReservation(
+                                reservation.id());
+
+                if (confirmed == null
+                        || !"CONFIRMED".equals(confirmed.status())) {
+                    throw new IllegalStateException(
+                            "Reservation confirmation failed: "
+                                    + reservation.id()
+                    );
+                }
+            }
+
+            // All inventory confirmations succeeded.
+            order.setPaymentMethod(paymentMethod);
+
+            order.setPaymentStatus(
+                    paymentMethod == PaymentMethod.COD
+                            ? PaymentStatus.NOT_REQUIRED
+                            : PaymentStatus.SUCCESS
+            );
+
+            order.setStatus(OrderStatus.CONFIRMED);
+
+            return toResponse(orderRepository.saveAndFlush(order));
+
+        } catch (Exception ex) {
+
+            // A database save might have succeeded even if
+            // the response to the caller failed.
+            try {
+                Order latest = findOrder(orderId);
+
+                if (latest.getStatus() == OrderStatus.CONFIRMED) {
+                    return toResponse(latest);
+                }
+            } catch (Exception lookupEx) {
+                ex.addSuppressed(lookupEx);
+            }
+
+            // Block checkout retries before attempting recovery.
+            try {
+                markRecoveryRequired(orderId);
+            } catch (Exception statusEx) {
+                ex.addSuppressed(statusEx);
+            }
+
+            boolean recoverySuccessful = true;
+
+            try {
+                List<ReservationClientDTO> current =
+                        inventoryClient.getReservationsByOrder(orderId);
+
+                if (current == null) {
+                    recoverySuccessful = false;
+                } else {
+                    for (ReservationClientDTO reservation : current) {
+
+                        if ("CONFIRMED".equals(reservation.status())) {
+
+                            try {
+                                ReservationClientDTO reversed =
+                                        inventoryClient.reverseReservation(
+                                                reservation.id());
+
+                                if (reversed == null
+                                        || !"REVERSED".equals(
+                                        reversed.status())) {
+                                    recoverySuccessful = false;
+                                }
+
+                            } catch (Exception recoveryEx) {
+                                recoverySuccessful = false;
+                            }
+                        }
+                    }
+                }
+
+            } catch (Exception recoveryEx) {
+                recoverySuccessful = false;
+            }
+
+            // Do not return to PENDING:
+            // reversed reservations cannot be reused.
+            throw new ResponseStatusException(
+                    recoverySuccessful
+                            ? CONFLICT
+                            : INTERNAL_SERVER_ERROR,
+                    recoverySuccessful
+                            ? "Checkout failed; order requires reconciliation before retry"
+                            : "Checkout recovery incomplete; manual reconciliation required",
+                    ex
+            );
+        }
+    }
+
+    @Override
     public OrderResponseDTO cancelOrder(Long orderId) {
 
+        // Verify that the order exists.
         Order order = findOrder(orderId);
 
         if (order.getStatus() == OrderStatus.CANCELLED) {
             return toResponse(order);
         }
 
-        if (order.getStatus() != OrderStatus.PENDING
-                && order.getStatus() != OrderStatus.CONFIRMED) {
+        // Use RECOVERY_REQUIRED as a temporary cancellation
+        // claim to block checkout and competing cancellations.
+        // A failure leaves the order blocked for reconciliation.
+        int claimed = orderRepository.updateStatusIfCurrent(
+                orderId,
+                OrderStatus.PENDING,
+                OrderStatus.RECOVERY_REQUIRED
+        );
+
+        if (claimed == 0) {
+            claimed = orderRepository.updateStatusIfCurrent(
+                    orderId,
+                    OrderStatus.CONFIRMED,
+                    OrderStatus.RECOVERY_REQUIRED
+            );
+        }
+
+        if (claimed != 1) {
             throw new ResponseStatusException(
                     CONFLICT,
-                    "Order cannot be cancelled in current status");
+                    "Order cannot be cancelled in current status"
+            );
         }
 
-        List<ReservationClientDTO> reservations =
-                inventoryClient.getReservationsByOrder(orderId);
+        try {
+            List<ReservationClientDTO> reservations =
+                    inventoryClient.getReservationsByOrder(orderId);
 
-        if (reservations == null) {
+            if (reservations == null || reservations.isEmpty()) {
+                throw new IllegalStateException(
+                        "No inventory reservations found for order"
+                );
+            }
+
+            for (ReservationClientDTO reservation : reservations) {
+
+                if ("ACTIVE".equals(reservation.status())) {
+
+                    inventoryClient.cancelReservation(
+                            reservation.id());
+
+                } else if ("CONFIRMED".equals(
+                        reservation.status())) {
+
+                    inventoryClient.reverseReservation(
+                            reservation.id());
+
+                } else if (!"CANCELLED".equals(
+                        reservation.status())
+                        && !"REVERSED".equals(
+                        reservation.status())) {
+
+                    throw new IllegalStateException(
+                            "Unexpected reservation status: "
+                                    + reservation.status()
+                    );
+                }
+            }
+
+            // Reload after the conditional status update.
+            Order latest = findOrder(orderId);
+            latest.setStatus(OrderStatus.CANCELLED);
+
+            return toResponse(
+                    orderRepository.saveAndFlush(latest));
+
+        } catch (Exception ex) {
+
+            // Leave the order in RECOVERY_REQUIRED.
+            // Never silently mark it CANCELLED.
             throw new ResponseStatusException(
-                    BAD_GATEWAY, "Reservation response is empty");
+                    INTERNAL_SERVER_ERROR,
+                    "Cancellation incomplete; reconciliation required",
+                    ex
+            );
         }
+    }
 
-        for (ReservationClientDTO reservation : reservations) {
-            if ("ACTIVE".equals(reservation.status())) {
-                inventoryClient.cancelReservation(
-                        reservation.id());
-            } else if (!"CANCELLED".equals(reservation.status())) {
-                throw new ResponseStatusException(
-                        CONFLICT,
-                        "Reservation cannot be cancelled: "
-                                + reservation.id());
+    private void markRecoveryRequired(Long orderId) {
+
+        int updated = orderRepository.updateStatusIfCurrent(
+                orderId,
+                OrderStatus.CHECKOUT_IN_PROGRESS,
+                OrderStatus.RECOVERY_REQUIRED
+        );
+
+        if (updated == 0) {
+            Order current = findOrder(orderId);
+
+            if (current.getStatus()
+                    != OrderStatus.RECOVERY_REQUIRED) {
+                throw new IllegalStateException(
+                        "Unable to mark order for recovery: "
+                                + current.getStatus()
+                );
             }
         }
-
-        order.setStatus(OrderStatus.CANCELLED);
-        return toResponse(orderRepository.saveAndFlush(order));
     }
 
     private Order findOrder(Long orderId) {
+
         return orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResponseStatusException(
                         NOT_FOUND,
@@ -329,7 +594,9 @@ public class OrderServiceImpl implements OrderService {
                 order.getWarehouseId(),
                 items,
                 order.getCreatedAt(),
-                order.getUpdatedAt()
+                order.getUpdatedAt(),
+                order.getPaymentMethod(),
+                order.getPaymentStatus()
         );
     }
 }

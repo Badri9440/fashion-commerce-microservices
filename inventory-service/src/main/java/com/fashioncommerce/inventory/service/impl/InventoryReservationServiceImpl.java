@@ -155,6 +155,43 @@ public class InventoryReservationServiceImpl
         return mapToResponse(reservation);
     }
 
+
+    @Override
+    public ReservationResponseDTO reverseReservation(Long reservationId) {
+
+        InventoryReservation reservation = findReservation(reservationId);
+
+        // Prevent restoring stock more than once.
+        if (reservation.getStatus() == ReservationStatus.REVERSED) {
+            return mapToResponse(reservation);
+        }
+
+        // Only confirmed reservations have deducted physical stock.
+        if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
+            throw new IllegalStateException(
+                    "Only CONFIRMED reservations can be reversed"
+            );
+        }
+
+        Inventory inventory = reservation.getInventory();
+        int quantity = reservation.getQuantity();
+
+        // Restore the stock deducted during confirmation.
+        inventory.setQuantity(
+                Math.addExact(inventory.getQuantity(), quantity)
+        );
+
+        // Reserved quantity remains unchanged because
+        // confirmation already released the reservation.
+        reservation.setStatus(ReservationStatus.REVERSED);
+
+        inventoryRepository.saveAndFlush(inventory);
+        reservationRepository.saveAndFlush(reservation);
+
+        return mapToResponse(reservation);
+    }
+
+
     @Override
     @Transactional(readOnly = true)
     public List<ReservationResponseDTO> getReservationsByOrder(Long orderId) {

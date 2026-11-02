@@ -3,6 +3,7 @@ package com.fashioncommerce.order.controller;
 
 import com.fashioncommerce.order.dto.OrderRequestDTO;
 import com.fashioncommerce.order.dto.OrderResponseDTO;
+import com.fashioncommerce.order.entity.PaymentMethod;
 import com.fashioncommerce.order.service.OrderService;
 
 import jakarta.validation.Valid;
@@ -60,6 +61,22 @@ public class OrderController {
     ) {
         return ResponseEntity.ok(
                 orderService.getOrdersByWarehouse(warehouseId));
+    }
+
+    @PostMapping("/{id}/checkout")
+    public ResponseEntity<OrderResponseDTO> checkout(
+            @PathVariable Long id,
+            @RequestParam PaymentMethod paymentMethod,
+            @RequestParam(required = false)
+            Boolean simulatePaymentSuccess
+    ) {
+        return ResponseEntity.ok(
+                orderService.checkout(
+                        id,
+                        paymentMethod,
+                        simulatePaymentSuccess
+                )
+        );
     }
 
     @PostMapping("/{id}/cancel")
