@@ -15,6 +15,9 @@ import com.fashioncommerce.order.entity.PaymentMethod;
 import com.fashioncommerce.order.entity.PaymentStatus;
 import com.fashioncommerce.order.repository.OrderRepository;
 import com.fashioncommerce.order.service.OrderService;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.access.AccessDeniedException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -96,7 +99,14 @@ public class OrderServiceImpl implements OrderService {
 
         Order order = new Order();
         order.setOrderNumber("ORD-" + UUID.randomUUID());
-        order.setCustomerId(request.customerId());
+
+
+        JwtAuthenticationToken authentication =
+                (JwtAuthenticationToken) SecurityContextHolder
+                        .getContext()
+                        .getAuthentication();
+
+        order.setKeycloakUserId(authentication.getToken().getSubject());
         order.setOrderType(request.orderType());
         order.setStatus(OrderStatus.PENDING);
         order.setDeliveryAddress(request.deliveryAddress());
@@ -236,7 +246,9 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public OrderResponseDTO getOrderById(Long orderId) {
-        return toResponse(findOrder(orderId));
+        Order order = findOrder(orderId);
+        verifyOwnership(order);
+        return toResponse(order);
     }
 
     @Override
@@ -247,15 +259,27 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new ResponseStatusException(
                         NOT_FOUND, "Order not found"));
 
+        verifyOwnership(order);
+
         return toResponse(order);
     }
 
     @Override
-    public List<OrderResponseDTO> getOrdersByCustomer(
-            Long customerId) {
+    public List<OrderResponseDTO> getOrdersByCustomer(Long customerId) {
 
-        return orderRepository.findByCustomerId(customerId)
-                .stream()
+        JwtAuthenticationToken auth =
+                (JwtAuthenticationToken) SecurityContextHolder
+                        .getContext().getAuthentication();
+
+        boolean admin = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+
+        List<Order> orders = admin
+                ? orderRepository.findByCustomerId(customerId)
+                : orderRepository.findByKeycloakUserId(
+                auth.getToken().getSubject());
+
+        return orders.stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -289,8 +313,9 @@ public class OrderServiceImpl implements OrderService {
                     "Simulated payment result is required");
         }
 
-        // Check existence first for a clear 404 response.
-        findOrder(orderId);
+        // Verify ownership before changing order status.
+        Order existingOrder = findOrder(orderId);
+        verifyOwnership(existingOrder);
 
         // Atomically claim the order.
         int claimed = orderRepository.updateStatusIfCurrent(
@@ -456,6 +481,7 @@ public class OrderServiceImpl implements OrderService {
 
         // Verify that the order exists.
         Order order = findOrder(orderId);
+        verifyOwnership(order);
 
         if (order.getStatus() == OrderStatus.CANCELLED) {
             return toResponse(order);
@@ -560,6 +586,20 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    private void verifyOwnership(Order order) {
+        JwtAuthenticationToken auth =
+                (JwtAuthenticationToken) SecurityContextHolder
+                        .getContext().getAuthentication();
+
+        boolean admin = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!admin && !auth.getToken().getSubject()
+                .equals(order.getKeycloakUserId())) {
+            throw new AccessDeniedException("Access denied");
+        }
+    }
+
     private Order findOrder(Long orderId) {
 
         return orderRepository.findById(orderId)
@@ -598,5 +638,18 @@ public class OrderServiceImpl implements OrderService {
                 order.getPaymentMethod(),
                 order.getPaymentStatus()
         );
+    }
+    @Override
+    public List<OrderResponseDTO> getMyOrders() {
+
+        JwtAuthenticationToken auth =
+                (JwtAuthenticationToken) SecurityContextHolder
+                        .getContext().getAuthentication();
+
+        return orderRepository
+                .findByKeycloakUserId(auth.getToken().getSubject())
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 }

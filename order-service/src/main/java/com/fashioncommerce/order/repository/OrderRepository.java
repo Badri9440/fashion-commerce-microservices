@@ -20,6 +20,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByCustomerId(Long customerId);
 
+    List<Order> findByKeycloakUserId(String keycloakUserId);
+
     List<Order> findByWarehouseId(Long warehouseId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)

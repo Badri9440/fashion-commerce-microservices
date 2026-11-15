@@ -21,6 +21,8 @@ public interface OrderService {
 
     OrderResponseDTO cancelOrder(Long orderId);
 
+    List<OrderResponseDTO> getMyOrders();
+
     OrderResponseDTO checkout(
             Long orderId,
             PaymentMethod paymentMethod,

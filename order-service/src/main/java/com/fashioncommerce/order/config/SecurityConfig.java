@@ -24,6 +24,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/api/orders/warehouse/**")
                         .hasAnyRole("ADMIN", "WAREHOUSE")
+                        .requestMatchers("/api/orders/customer/**")
+                        .hasRole("ADMIN")
                         .requestMatchers("/api/orders/**")
                         .hasAnyRole("CUSTOMER", "ADMIN")
                         .anyRequest().denyAll())
@@ -32,7 +34,7 @@ public class SecurityConfig {
                 .build();
     }
 
-    private JwtAuthenticationConverter jwtConverter() {
+    JwtAuthenticationConverter jwtConverter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
 
         converter.setJwtGrantedAuthoritiesConverter(jwt -> {

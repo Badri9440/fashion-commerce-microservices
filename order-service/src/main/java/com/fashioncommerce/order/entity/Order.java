@@ -22,8 +22,11 @@ public class Order {
     @Column(nullable = false, unique = true)
     private String orderNumber;
 
-    @Column(nullable = false)
+    @Column(name = "customer_id")
     private Long customerId;
+
+    @Column(name = "keycloak_user_id", nullable = false, length = 36)
+    private String keycloakUserId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

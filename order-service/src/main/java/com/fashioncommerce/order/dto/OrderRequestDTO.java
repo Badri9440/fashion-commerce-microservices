@@ -11,8 +11,7 @@ import java.util.List;
 
 public record OrderRequestDTO(
 
-        @NotNull(message = "Customer ID is required")
-        Long customerId,
+
 
         @NotNull(message = "Order type is required")
         OrderType orderType,
