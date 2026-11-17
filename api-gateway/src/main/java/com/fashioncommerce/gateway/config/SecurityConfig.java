@@ -29,8 +29,15 @@ public class SecurityConfig {
                         .hasAnyRole("ADMIN", "WAREHOUSE")
                         .pathMatchers("/api/orders", "/api/orders/**")
                         .hasAnyRole("CUSTOMER", "ADMIN")
-                        .pathMatchers("/api/inventory", "/api/inventory/**")
+
+                        .pathMatchers(
+                                "/api/inventory", "/api/inventory/**",
+                                "/api/warehouses", "/api/warehouses/**")
                         .hasAnyRole("ADMIN", "WAREHOUSE")
+
+                        .pathMatchers("/api/reservations", "/api/reservations/**")
+                        .denyAll()
+
 
                         .pathMatchers(HttpMethod.GET,
                                 "/api/products", "/api/products/**",
