@@ -38,11 +38,14 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health").permitAll()
-                        .requestMatchers("/api/reservations/**").permitAll()
+                        .requestMatchers("/api/reservations", "/api/reservations/**")
+                        .hasRole("INTERNAL_ORDER_SERVICE")
+
                         .requestMatchers(HttpMethod.GET,
                                 "/api/inventory/**",
                                 "/api/warehouses/**")
-                        .hasAnyRole("ADMIN", "WAREHOUSE")
+                        .hasAnyRole("ADMIN", "WAREHOUSE", "INTERNAL_ORDER_SERVICE")
+
                         .requestMatchers("/api/inventory/**",
                                 "/api/warehouses/**")
                         .hasAnyRole("ADMIN", "WAREHOUSE")
