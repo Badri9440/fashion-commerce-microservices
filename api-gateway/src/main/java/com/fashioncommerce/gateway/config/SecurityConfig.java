@@ -31,8 +31,15 @@ public class SecurityConfig {
                         .hasAnyRole("CUSTOMER", "ADMIN")
                         .pathMatchers("/api/inventory", "/api/inventory/**")
                         .hasAnyRole("ADMIN", "WAREHOUSE")
-                        .pathMatchers("/api/products", "/api/products/**")
+
+                        .pathMatchers(HttpMethod.GET,
+                                "/api/products", "/api/products/**",
+                                "/api/variants", "/api/variants/**")
                         .authenticated()
+                        .pathMatchers("/api/products", "/api/products/**",
+                                "/api/variants", "/api/variants/**")
+                        .hasRole("ADMIN")
+
                         .anyExchange().denyAll()
                 )
                 .oauth2ResourceServer(oauth -> oauth
