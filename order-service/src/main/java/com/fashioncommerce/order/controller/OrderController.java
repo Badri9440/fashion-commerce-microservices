@@ -1,5 +1,6 @@
 
 package com.fashioncommerce.order.controller;
+import com.fashioncommerce.order.entity.OrderStatus;
 
 import com.fashioncommerce.order.dto.OrderRequestDTO;
 import com.fashioncommerce.order.dto.OrderResponseDTO;
@@ -89,5 +90,13 @@ public class OrderController {
     ) {
         return ResponseEntity.ok(
                 orderService.cancelOrder(id));
+    }
+    @PatchMapping("/{id}/fulfillment")
+    public ResponseEntity<OrderResponseDTO> updateFulfillment(
+            @PathVariable Long id,
+            @RequestParam OrderStatus status) {
+
+        return ResponseEntity.ok(
+                orderService.updateFulfillmentStatus(id, status));
     }
 }

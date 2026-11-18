@@ -1,6 +1,6 @@
 
 package com.fashioncommerce.order.service;
-
+import com.fashioncommerce.order.entity.OrderStatus;
 import com.fashioncommerce.order.dto.OrderRequestDTO;
 import com.fashioncommerce.order.dto.OrderResponseDTO;
 import com.fashioncommerce.order.entity.PaymentMethod;
@@ -22,6 +22,11 @@ public interface OrderService {
     OrderResponseDTO cancelOrder(Long orderId);
 
     List<OrderResponseDTO> getMyOrders();
+
+    OrderResponseDTO updateFulfillmentStatus(
+            Long orderId,
+            OrderStatus nextStatus
+    );
 
     OrderResponseDTO checkout(
             Long orderId,

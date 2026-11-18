@@ -652,4 +652,33 @@ public class OrderServiceImpl implements OrderService {
                 .map(this::toResponse)
                 .toList();
     }
+    @Override
+    public OrderResponseDTO updateFulfillmentStatus(
+            Long orderId, OrderStatus nextStatus) {
+
+        Order order = findOrder(orderId);
+        OrderStatus current = order.getStatus();
+
+        boolean valid = switch (current) {
+            case CONFIRMED -> nextStatus == OrderStatus.PROCESSING;
+            case PROCESSING -> nextStatus == OrderStatus.SHIPPED;
+            case SHIPPED -> nextStatus == OrderStatus.DELIVERED;
+            default -> false;
+        };
+
+        if (!valid) {
+            throw new ResponseStatusException(
+                    CONFLICT, "Invalid fulfillment transition");
+        }
+
+        int updated = orderRepository.updateStatusIfCurrent(
+                orderId, current, nextStatus);
+
+        if (updated != 1) {
+            throw new ResponseStatusException(
+                    CONFLICT, "Order status changed concurrently");
+        }
+
+        return toResponse(findOrder(orderId));
+    }
 }

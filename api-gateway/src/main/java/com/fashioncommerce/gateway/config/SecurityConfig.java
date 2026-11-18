@@ -27,6 +27,8 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .pathMatchers("/api/orders/warehouse/**")
                         .hasAnyRole("ADMIN", "WAREHOUSE")
+                        .pathMatchers("/api/orders/*/fulfillment")
+                        .hasAnyRole("ADMIN", "WAREHOUSE")
                         .pathMatchers("/api/orders", "/api/orders/**")
                         .hasAnyRole("CUSTOMER", "ADMIN")
 
@@ -46,6 +48,7 @@ public class SecurityConfig {
                         .pathMatchers("/api/products", "/api/products/**",
                                 "/api/variants", "/api/variants/**")
                         .hasRole("ADMIN")
+
 
                         .anyExchange().denyAll()
                 )

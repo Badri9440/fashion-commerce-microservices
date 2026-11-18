@@ -26,6 +26,8 @@ public class SecurityConfig {
                         .hasAnyRole("ADMIN", "WAREHOUSE")
                         .requestMatchers("/api/orders/customer/**")
                         .hasRole("ADMIN")
+                        .requestMatchers("/api/orders/*/fulfillment")
+                        .hasAnyRole("ADMIN", "WAREHOUSE")
                         .requestMatchers("/api/orders/**")
                         .hasAnyRole("CUSTOMER", "ADMIN")
                         .anyRequest().denyAll())
